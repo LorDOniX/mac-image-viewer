@@ -1,8 +1,18 @@
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
+import Darwin
 
 public enum ImageFolder {
+    public static func canonicalURL(_ url: URL) -> URL {
+        guard url.isFileURL else { return url }
+        let path = url.withUnsafeFileSystemRepresentation { pointer -> String? in
+            guard let pointer, let resolved = realpath(pointer, nil) else { return nil }
+            defer { free(resolved) }
+            return String(cString: resolved)
+        }
+        return path.map { URL(fileURLWithPath: $0, isDirectory: url.hasDirectoryPath) } ?? url.standardizedFileURL
+    }
     private static let identifiers = CGImageSourceCopyTypeIdentifiers() as! [String]
     public static let supportedTypes: [UTType] = {
         let types = identifiers.compactMap { UTType($0) }
@@ -26,6 +36,7 @@ public enum ImageFolder {
     }
 
     public static func images(beside url: URL) throws -> [URL] {
+        let url = canonicalURL(url)
         let files = try FileManager.default.contentsOfDirectory(
             at: url.deletingLastPathComponent(),
             includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]

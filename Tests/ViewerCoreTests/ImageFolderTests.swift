@@ -4,6 +4,19 @@ import UniformTypeIdentifiers
 @testable import ViewerCore
 
 final class ImageFolderTests: XCTestCase {
+    func testOpeningThroughDirectorySymlinkDoesNotDuplicateCurrentImage() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let image = folder.appendingPathComponent("photo.jpg")
+        try Data().write(to: image)
+        let alias = folder.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: folder)
+        let aliasedImage = alias.appendingPathComponent("photo.jpg")
+        let canonical = ImageFolder.canonicalURL(aliasedImage)
+        XCTAssertEqual(canonical, ImageFolder.canonicalURL(image))
+        XCTAssertEqual(try ImageFolder.images(beside: aliasedImage), [canonical])
+    }
     func testFolderFiltersAndSortsNaturally() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

@@ -3,6 +3,7 @@ import ViewerCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var viewer: ViewerWindowController!
+    private var terminationPending = false
     private let defaultApplications = DefaultApplicationsController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -33,7 +34,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard viewer != nil else { return .terminateNow }
+        if terminationPending { return .terminateLater }
+        terminationPending = true
+        DispatchQueue.main.async { [self] in
+            viewer.prepareToLeave { [self] allowed in
+                terminationPending = false
+                sender.reply(toApplicationShouldTerminate: allowed)
+            }
+        }
+        return .terminateLater
+    }
+
     @objc private func openFile() { ensureWindow(); viewer.chooseFile() }
+    @objc private func selectAllItems(_ sender: Any?) {
+        if viewer?.selectAllGalleryIfVisible() == true { return }
+        NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: sender)
+    }
     @objc private func toggleInfo() { viewer.toggleInfo() }
     @objc private func toggleFullscreen() { viewer.window?.toggleFullScreen(nil) }
     @objc private func setDefaultApplications() {
@@ -71,6 +89,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             entry.target = viewer
             entry.keyEquivalentModifierMask = modifiers
         }
+        item("Operace s vybranými…", #selector(ViewerWindowController.exportSelected), in: fileMenu)
+        item("Zobrazit ve Finderu", #selector(ViewerWindowController.revealInFinder), key: "r", modifiers: [.command, .shift], in: fileMenu)
+        item("Kopírovat cestu k souboru", #selector(ViewerWindowController.copyFilePath), key: "c", modifiers: [.command, .option], in: fileMenu)
+        fileMenu.addItem(.separator())
+        item("Přesunout do koše…", #selector(ViewerWindowController.trashCurrent), key: "\u{8}", in: fileMenu)
+        item("Vrátit poslední obrázek z koše", #selector(ViewerWindowController.restoreFromTrash), key: "z", modifiers: [.command, .shift], in: fileMenu)
         item("Zpět – poslední úprava", #selector(ViewerWindowController.undoEdit), key: "z", in: editMenu)
         editMenu.addItem(.separator())
         item("Otočit doleva o 90°", #selector(ViewerWindowController.rotateLeft), key: "l", in: editMenu)
@@ -86,11 +110,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Kopírovat", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         item("Kopírovat EXIF jako JSON", #selector(ViewerWindowController.copyExifJSON), key: "c", modifiers: [.command, .shift], in: editMenu)
-        editMenu.addItem(withTitle: "Vybrat vše", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let selectAll = editMenu.addItem(withTitle: "Vybrat vše", action: #selector(selectAllItems(_:)), keyEquivalent: "a")
+        selectAll.target = self
         editItem.submenu = editMenu
         menu.addItem(editItem)
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: "Zobrazení")
+        item("Spustit prezentaci…", #selector(ViewerWindowController.startSlideshow), key: "p", in: viewMenu)
+        item("Zastavit prezentaci", #selector(ViewerWindowController.stopSlideshow), key: ".", in: viewMenu)
+        viewMenu.addItem(.separator())
+        let comparisonHint = NSMenuItem(title: "Porovnání s originálem: podržte B", action: nil, keyEquivalent: "")
+        viewMenu.addItem(comparisonHint)
         item("Galerie", #selector(ViewerWindowController.toggleGallery), key: "g", in: viewMenu)
         viewMenu.addItem(.separator())
         item("Přiblížit", #selector(ViewerWindowController.zoomIn), key: "+", in: viewMenu)

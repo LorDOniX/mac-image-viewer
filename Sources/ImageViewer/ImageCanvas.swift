@@ -2,8 +2,22 @@ import AppKit
 import ViewerCore
 
 final class ImageCanvas: NSView {
+    var revealFile: (() -> Void)?
+    var copyPath: (() -> Void)?
+    var trashFile: (() -> Void)?
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard image != nil else { return nil }
+        let menu = NSMenu()
+        for (title, action) in [("Zobrazit ve Finderu", #selector(contextReveal)), ("Kopírovat cestu", #selector(contextCopy)), ("Přesunout do koše…", #selector(contextTrash))] {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: ""); item.target = self
+        }
+        return menu
+    }
+    @objc private func contextReveal() { revealFile?() }
+    @objc private func contextCopy() { copyPath?() }
+    @objc private func contextTrash() { trashFile?() }
     var originalImage: NSImage?
-    var stopSlideshow: (() -> Void)?
+    var stopSlideshow: (() -> Bool)?
     private(set) var isComparing = false
     private var displayedImage: NSImage? { isComparing ? originalImage : image }
     func endComparison() { isComparing = false; needsDisplay = true; viewChanged?() }
@@ -207,8 +221,8 @@ final class ImageCanvas: NSView {
         case 123, 126: navigate?(-1)
         case 124, 125: navigate?(1)
         case 53:
-            stopSlideshow?()
-            if window?.styleMask.contains(.fullScreen) == true { window?.toggleFullScreen(nil) }
+            let exiting = stopSlideshow?() ?? false
+            if !exiting, window?.styleMask.contains(.fullScreen) == true { window?.toggleFullScreen(nil) }
         default:
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "f": window?.toggleFullScreen(nil)

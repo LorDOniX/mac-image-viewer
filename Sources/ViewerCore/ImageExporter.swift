@@ -40,7 +40,7 @@ public struct ExportSettings {
 }
 
 public enum ImageExporter {
-    public static func write(source: URL, edits: [ImageEdit], to destination: URL, format: ExportFormat, settings: ExportSettings = ExportSettings()) throws {
+    public static func write(source: URL, edits: [ImageEdit], to destination: URL, format: ExportFormat, settings: ExportSettings = ExportSettings(), overwrite: Bool = true) throws {
         // Export starts from the original resolution, independently of the preview,
         // window size, zoom or pan. ImageIO applies the original EXIF orientation.
         let loaded = try LoadedImage(url: source, maxPixelSize: nil)
@@ -77,7 +77,14 @@ public enum ImageExporter {
         guard CGImageDestinationFinalize(encoder) else { throw failure("Obrázek se nepodařilo zakódovat.") }
         // Encode completely before touching the destination, also when replacing
         // the source file after the system Save panel's overwrite confirmation.
-        try (data as Data).write(to: destination, options: .atomic)
+        if overwrite {
+            try (data as Data).write(to: destination, options: .atomic)
+        } else {
+            let staging = destination.deletingLastPathComponent().appendingPathComponent(".image-viewer-" + UUID().uuidString + ".tmp")
+            defer { try? FileManager.default.removeItem(at: staging) }
+            try (data as Data).write(to: staging, options: .atomic)
+            try FileManager.default.moveItem(at: staging, to: destination)
+        }
     }
 
     public static func exportMetadata(_ source: [String: Any], width: Int, height: Int, settings: ExportSettings) -> [String: Any] {

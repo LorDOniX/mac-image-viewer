@@ -9,6 +9,7 @@ private final class ThumbnailBox: NSObject {
 private final class ThumbnailLoader {
     private let queue = OperationQueue()
     private let cache = NSCache<NSURL, ThumbnailBox>()
+    private let diskCache = ThumbnailDiskCache()
 
     init() {
         queue.maxConcurrentOperationCount = 3
@@ -22,9 +23,15 @@ private final class ThumbnailLoader {
             return nil
         }
         let operation = BlockOperation()
-        operation.addExecutionBlock { [weak operation, cache] in
+        operation.addExecutionBlock { [weak operation, cache, diskCache] in
             guard operation?.isCancelled == false else { return }
-            let image = autoreleasepool { ImageThumbnail.load(url: url) }
+            let image = autoreleasepool { () -> CGImage? in
+                let key = diskCache.key(for: url)
+                if let key, let cached = diskCache.load(key: key) { return cached }
+                let decoded = ImageThumbnail.load(url: url)
+                if let decoded, let key, operation?.isCancelled == false { diskCache.store(decoded, key: key) }
+                return decoded
+            }
             guard operation?.isCancelled == false else { return }
             if let image { cache.setObject(ThumbnailBox(image), forKey: url as NSURL, cost: image.bytesPerRow * image.height) }
             DispatchQueue.main.async {
@@ -112,20 +119,22 @@ private final class GalleryGrid: NSCollectionView {
     var activate: ((IndexPath) -> Void)?
     var dismiss: (() -> Void)?
     var selectionMode = false
+    var selectionUpdated: (() -> Void)?
     var contextAction: ((String) -> Void)?
     override func menu(for event: NSEvent) -> NSMenu? {
         if let path = indexPathForItem(at: convert(event.locationInWindow, from: nil)), !selectionIndexPaths.contains(path) {
             selectionIndexPaths = [path]
+            selectionUpdated?()
         }
         let menu = NSMenu()
-        for (title, tag) in [("Zobrazit ve Finderu", 1), ("Kopírovat cestu", 2), ("Exportovat vybrané…", 3)] {
+        for (title, tag) in [("Zobrazit ve Finderu", 1), ("Kopírovat cestu", 2), ("Operace s výběrem…", 3), ("Vybrat vše", 4)] {
             let item = menu.addItem(withTitle: title, action: #selector(contextMenuAction(_:)), keyEquivalent: "")
             item.tag = tag; item.target = self
         }
         return menu
     }
     @objc private func contextMenuAction(_ sender: NSMenuItem) {
-        contextAction?(sender.tag == 1 ? "finder" : sender.tag == 2 ? "path" : "export")
+        contextAction?(sender.tag == 1 ? "finder" : sender.tag == 2 ? "path" : sender.tag == 4 ? "selectAll" : "export")
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -140,7 +149,10 @@ private final class GalleryGrid: NSCollectionView {
             let current = selectionIndexPaths.first?.item ?? 0
             let count = numberOfSections > 0 ? numberOfItems(inSection: 0) : 0
             if let next = ImageFolder.nextIndex(current: current, step: event.keyCode == 123 ? -1 : 1, count: count) {
-                selectItems(at: [IndexPath(item: next, section: 0)], scrollPosition: .centeredVertically)
+                let path = IndexPath(item: next, section: 0)
+                selectionIndexPaths = event.modifierFlags.contains(.shift) ? selectionIndexPaths.union([path]) : [path]
+                scrollToItems(at: [path], scrollPosition: .centeredVertically)
+                selectionUpdated?()
             }
         }
         else if event.keyCode == 53 { dismiss?() }
@@ -159,6 +171,11 @@ final class GalleryView: NSScrollView, NSCollectionViewDataSource, NSCollectionV
     var selectionChanged: (() -> Void)?
     var contextAction: ((String) -> Void)?
     var selectedIndices: [Int] { grid.selectionIndexPaths.map(\.item).sorted() }
+    func selectAllImages() { selectImages(at: Array(files.indices)) }
+    func selectImages(at indices: [Int]) {
+        grid.selectionIndexPaths = Set(indices.filter { files.indices.contains($0) }.map { IndexPath(item: $0, section: 0) })
+        selectionChanged?()
+    }
     func setSelectionMode(_ enabled: Bool) { grid.selectionMode = enabled }
     func setThumbnailSize(_ width: Double) {
         guard let layout = grid.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
@@ -184,6 +201,7 @@ final class GalleryView: NSScrollView, NSCollectionViewDataSource, NSCollectionV
         grid.isSelectable = true
         grid.allowsMultipleSelection = true
         grid.delegate = self
+        grid.selectionUpdated = { [weak self] in self?.selectionChanged?() }
         grid.contextAction = { [weak self] in self?.contextAction?($0) }
         grid.dataSource = self
         grid.activate = { [weak self] path in

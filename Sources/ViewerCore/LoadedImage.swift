@@ -10,11 +10,15 @@ public final class LoadedImage: NSObject {
     private let metadata: [String: Any]
     public var metadataProperties: [String: Any] { metadata }
     public var cost: Int { bitmap.bytesPerRow * bitmap.height }
+    public var decodedPixelSize: Int { max(bitmap.width, bitmap.height) }
+    public func satisfies(pixelLimit: Int) -> Bool {
+        decodedPixelSize >= min(pixelLimit, Int(max(size.width, size.height)))
+    }
 
     public func metadataJSON() throws -> String { try MetadataJSON.encode(metadata) }
 
-    public init(url: URL, maxPixelSize: Int? = 6000) throws {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+    public init(url: URL, maxPixelSize: Int? = 6000, preferEmbeddedThumbnail: Bool = false) throws {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             throw NSError(domain: "ImageViewer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Soubor nelze přečíst jako obrázek."])
         }
         let identifier = CGImageSourceGetType(source) as String? ?? ""
@@ -25,7 +29,8 @@ public final class LoadedImage: NSObject {
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] ?? [:]
         metadata = properties
         let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailFromImageAlways: !preferEmbeddedThumbnail || maxPixelSize == nil,
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize ?? max(
                 (properties[kCGImagePropertyPixelWidth as String] as? Int) ?? 1,
